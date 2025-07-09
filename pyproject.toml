@@ -6,7 +6,6 @@ authors = ["Your Name <you@example.com>"]
 requires-python = ">=3.11"
 dependencies = [
     "matplotlib>=3.10.3",
-    "python-telegram-bot>=22.1",
+    "python-telegram-bot[job-queue]>=20.8",
     "requests>=2.32.4",
-    "telegram>=0.0.1",
 ]

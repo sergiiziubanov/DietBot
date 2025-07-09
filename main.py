@@ -151,9 +151,14 @@ async def weekly_menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("На 3 дня", callback_data="gen_menu:3"), InlineKeyboardButton("На 5 дней", callback_data="gen_menu:5"), InlineKeyboardButton("На 7 дней", callback_data="gen_menu:7")]])
     await update.message.reply_text("На сколько дней вы хотите получить меню?", reply_markup=keyboard)
 
-async def generate_and_send_menu(update_or_query: Update | CallbackQueryHandler, context: ContextTypes.DEFAULT_TYPE, num_days: int):
-    if isinstance(update_or_query, Update): user_id, chat_id = update_or_query.effective_user.id, update_or_query.effective_chat.id
-    else: query = update_or_query; user_id, chat_id = query.from_user.id, query.message.chat_id
+async def generate_and_send_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, num_days: int):
+    if hasattr(update_or_query, 'effective_user'): 
+        # Это Update объект
+        user_id, chat_id = update_or_query.effective_user.id, update_or_query.effective_chat.id
+    else: 
+        # Это CallbackQuery объект
+        query = update_or_query
+        user_id, chat_id = query.from_user.id, query.message.chat_id
     targets = await calculate_target_calories_and_pfc(user_id)
     if not targets[0]: await context.bot.send_message(chat_id=chat_id, text="❗ Сначала настройте профиль (/start) и запишите свой вес."); return
     await context.bot.send_message(chat_id=chat_id, text=f"📊 Генерирую ваше персональное меню на {num_days} {'день' if num_days == 1 else 'дня'}...")
@@ -335,7 +340,7 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
-    handlers = {"Показать меню на день": menu_command, "Меню на несколько дней": weekly_menu_command, "Рассчитать КБЖУ": calories_command, "Прогресс веса": progress_command, "Записать еду": log_food_command, "Предпочтения": prefs_command, "Что в холодильнике": fridge_command}
+    handlers = {"Показать меню на день": menu_command, "Меню на неделю": weekly_menu_command, "Рассчитать КБЖУ": calories_command, "Прогресс веса": progress_command, "Записать еду": log_food_command, "Предпочтения": prefs_command, "Что в холодильнике": fridge_command}
     handler = handlers.get(text)
     if handler: await handler(update, context)
     else: await handle_text_messages(update, context)
@@ -352,7 +357,7 @@ def main():
     app.add_handler(CommandHandler("calories", calories_command)); app.add_handler(CommandHandler("progress", progress_command))
     app.add_handler(CommandHandler("log_food", log_food_command)); app.add_handler(CommandHandler("prefs", prefs_command)); app.add_handler(CommandHandler("fridge", fridge_command))
     app.add_handler(CallbackQueryHandler(inline_button_handler))
-    main_buttons = ["Показать меню на день", "Меню на несколько дней", "Рассчитать КБЖУ", "Прогресс веса", "Записать еду", "Предпочтения", "Что в холодильнике"]
+    main_buttons = ["Показать меню на день", "Меню на неделю", "Рассчитать КБЖУ", "Прогресс веса", "Записать еду", "Предпочтения", "Что в холодильнике"]
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(f"^({'|'.join(main_buttons)})$"), button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
     print("Bot started polling...")
