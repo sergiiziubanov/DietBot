@@ -1,3 +1,4 @@
+from telegram import Update
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, JobQueue, CallbackQueryHandler
 from telegram.ext import PicklePersistence
