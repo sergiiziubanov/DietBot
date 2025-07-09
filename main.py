@@ -345,7 +345,7 @@ def main():
     persistence = PicklePersistence(filepath=PERSISTENCE_FILE)
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not telegram_bot_token: print("ERROR: TELEGRAM_BOT_TOKEN not set."); exit(1)
-    app = ApplicationBuilder().token(telegram_bot_token).persistence(persistence).build()
+    app = ApplicationBuilder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
     app.add_handler(CommandHandler("start", start)); app.add_handler(CommandHandler("menu", menu_command))
     app.add_handler(CommandHandler("weeklymenu", weekly_menu_command))
     app.add_handler(CommandHandler("calories", calories_command)); app.add_handler(CommandHandler("progress", progress_command))
