@@ -261,17 +261,34 @@ async def weekly_menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("На 3 дня", callback_data="gen_menu:3"), InlineKeyboardButton("На 5 дней", callback_data="gen_menu:5"), InlineKeyboardButton("На 7 дней", callback_data="gen_menu:7")]])
     await update.message.reply_text("На сколько дней вы хотите получить меню?", reply_markup=keyboard)
 
-async def generate_and_send_menu(update_or_query: Update | CallbackQueryHandler, context: ContextTypes.DEFAULT_TYPE, num_days: int):
-    chat_id = update_or_query.effective_chat.id
-    user_id = update_or_query.effective_user.id
+### ВСТАВЬТЕ ЭТОТ КОД ВМЕСТО СТАРОЙ ФУНКЦИИ generate_and_send_menu ###
+
+async def generate_and_send_menu(update_or_query: Update | CallbackQuery, context: ContextTypes.DEFAULT_TYPE, num_days: int):
+    # Добавляем проверку типа объекта, чтобы код работал и с командами, и с кнопками
+    if isinstance(update_or_query, Update):
+        # Вызов пришел от команды
+        chat_id = update_or_query.effective_chat.id
+        user_id = update_or_query.effective_user.id
+        sender = context.bot # Отправлять сообщения будет сам бот
+    else:
+        # Вызов пришел от инлайн-кнопки (CallbackQuery)
+        query = update_or_query
+        chat_id = query.message.chat.id
+        user_id = query.from_user.id
+        sender = query # Отвечать будет объект query, чтобы редактировать сообщение
 
     targets = await calculate_target_calories_and_pfc(user_id)
     if not targets[0]:
         await context.bot.send_message(chat_id=chat_id, text="❗ Сначала настройте профиль (/start) и запишите свой вес.")
         return
 
-    await context.bot.send_message(chat_id=chat_id, text=f"📊 Генерирую ваше персональное меню на {num_days} {'день' if num_days == 1 else 'дня'}...")
+    # При нажатии кнопки лучше отредактировать старое сообщение, а не слать новое
+    if isinstance(sender, CallbackQuery):
+        await sender.edit_message_text(text=f"📊 Генерирую ваше персональное меню на {num_days} {'день' if num_days == 1 else 'дня'}...")
+    else:
+        await sender.send_message(chat_id=chat_id, text=f"📊 Генерирую ваше персональное меню на {num_days} {'день' if num_days == 1 else 'дня'}...")
 
+    # Здесь происходит вызов ВАШЕЙ функции
     user_profile = user_profiles_data.get(str(user_id), {})
     pfc_targets = {'p': targets[1], 'f': targets[2], 'c': targets[3]}
     menu_data = await generate_personalized_menu_with_llm(user_profile, targets[0], pfc_targets, num_days=num_days)
