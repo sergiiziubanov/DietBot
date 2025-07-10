@@ -4,6 +4,7 @@ from telegram.ext import (
     PicklePersistence, CallbackQueryHandler, JobQueue
 )
 import datetime
+import google.generativeai as genai
 import json
 import os
 import matplotlib.pyplot as plt
@@ -73,33 +74,117 @@ def create_pfc_pie_chart(pfc_data):
     return buf
 
 async def generate_personalized_menu_with_llm(user_profile, calorie_target, pfc_targets, num_days=1, meal_to_replace=None):
-    SAMPLE_BREAKFASTS = [{"meal_name": "Завтрак (Овсянка с ягодами)", "items": [{"food_item": "овсяные хлопья", "grams": 50}, {"food_item": "ягоды", "grams": 100}], "total_calories": 350, "total_protein": 15, "total_fat": 8, "total_carbs": 55, "recipe": "Залить овсянку кипятком/молоком, добавить ягоды, дать настояться 5 минут."}]
-    SAMPLE_LUNCHES = [{"meal_name": "Обед (Куриная грудка с гречкой)", "items": [{"food_item": "куриная грудка", "grams": 150}, {"food_item": "гречка", "grams": 60}], "total_calories": 550, "total_protein": 45, "total_fat": 10, "total_carbs": 60, "recipe": "Отварить гречку. Грудку запечь в специях или обжарить на гриле."}]
-    SAMPLE_DINNERS = [{"meal_name": "Ужин (Творог с орехами)", "items": [{"food_item": "творог", "grams": 180}, {"food_item": "грецкие орехи", "grams": 20}], "total_calories": 300, "total_protein": 30, "total_fat": 18, "total_carbs": 8, "recipe": "Смешать творог с измельченными орехами."}]
-    if meal_to_replace:
-        original_name = meal_to_replace.get('meal_name', '').lower()
-        if 'завтрак' in original_name: return random.choice(SAMPLE_BREAKFASTS)
-        elif 'обед' in original_name: return random.choice(SAMPLE_LUNCHES)
-        else: return random.choice(SAMPLE_DINNERS)
-    else:
-        weekly_plan = []; consolidated_list = defaultdict(int)
-        for i in range(num_days):
-            day_meals = [random.choice(SAMPLE_BREAKFASTS), random.choice(SAMPLE_LUNCHES), random.choice(SAMPLE_DINNERS)]
-            for meal in day_meals:
-                for item in meal.get('items', []): consolidated_list[item['food_item']] += item['grams']
-            day_menu = {"day_name": f"День {i+1}", "meals": day_meals}
-            weekly_plan.append(day_menu)
-        shopping_list_formatted = [f"{name}: {grams}г" for name, grams in consolidated_list.items()]
-        return {"weekly_plan": weekly_plan, "shopping_list": shopping_list_formatted}
+    # Проверяем, доступен ли API-ключ
+    if not GEMINI_API_KEY:
+        return {"weekly_plan": [], "shopping_list": ["ОШИБКА: API-ключ для Gemini не настроен."]}
+
+    # Выбираем модель
+    model = genai.GenerativeModel('gemini-pro')
+    
+    # Создаем очень подробный промпт для нейросети
+    # Мы просим ее вернуть ответ строго в формате JSON, чтобы наш код мог его прочитать
+    prompt = f"""
+    Выступи в роли диетолога. Создай план питания на {num_days} дней для пользователя со следующими параметрами:
+    - Пол: {user_profile.get('gender')}
+    - Возраст: {user_profile.get('age')}
+    - Рост: {user_profile.get('height')} см
+    - Уровень активности: {user_profile.get('activity')} из 5
+    - Цель диеты: {user_profile.get('diet_goal')}
+
+    Суточная цель по калориям: примерно {calorie_target} ккал.
+    Цель по БЖУ: Белки ~{pfc_targets['p']}г, Жиры ~{pfc_targets['f']}г, Углеводы ~{pfc_targets['c']}г.
+
+    Пожалуйста, верни ответ ИСКЛЮЧИТЕЛЬНО в формате JSON. Не добавляй никакого текста до или после JSON.
+    Структура JSON должна быть следующей:
+    {{
+      "weekly_plan": [
+        {{
+          "day_name": "День 1",
+          "meals": [
+            {{
+              "meal_name": "Завтрак (Название блюда)",
+              "items": [{{"food_item": "название продукта", "grams": 100}}],
+              "total_calories": 350,
+              "total_protein": 20,
+              "total_fat": 10,
+              "total_carbs": 45,
+              "recipe": "Краткий рецепт приготовления."
+            }},
+            {{
+              "meal_name": "Обед (Название блюда)",
+              "items": [], "total_calories": 550, "total_protein": 40, "total_fat": 20, "total_carbs": 50, "recipe": "..."
+            }},
+            {{
+              "meal_name": "Ужин (Название блюда)",
+              "items": [], "total_calories": 400, "total_protein": 30, "total_fat": 15, "total_carbs": 35, "recipe": "..."
+            }}
+          ]
+        }}
+      ],
+      "shopping_list": ["Продукт 1: X г", "Продукт 2: Y г"]
+    }}
+    Создай разнообразные и простые блюда. Список покупок должен включать все ингредиенты на {num_days} дней.
+    """
+
+    try:
+        # Отправляем запрос в нейросеть
+        response = await model.generate_content_async(prompt)
+        
+        # Очищаем ответ от лишних символов и загружаем JSON
+        json_text = response.text.strip().replace("```json", "").replace("```", "")
+        parsed_json = json.loads(json_text)
+        return parsed_json
+        
+    except Exception as e:
+        print(f"Ошибка при вызове API Gemini: {e}")
+        return {"weekly_plan": [], "shopping_list": [f"ОШИБКА: Не удалось сгенерировать меню. {e}"]}
 
 async def calculate_calories_from_food_list_llm(user_id, food_list_items):
-    food_list_str = "; ".join(food_list_items); print(f"LLM STUB: Calculating PFC for '{food_list_str}'")
-    return {"calories": 300, "protein": 30, "fat": 15, "carbs": 10}
+    if not GEMINI_API_KEY: return None
+    
+    model = genai.GenerativeModel('gemini-pro')
+    food_list_str = ", ".join(food_list_items)
+    
+    prompt = f"""
+    Подсчитай КБЖУ для следующего списка съеденных продуктов: {food_list_str}.
+    Верни ответ ТОЛЬКО в формате JSON, без лишнего текста. Пример:
+    {{
+      "calories": 500,
+      "protein": 30,
+      "fat": 20,
+      "carbs": 50
+    }}
+    """
+    
+    try:
+        response = await model.generate_content_async(prompt)
+        json_text = response.text.strip().replace("```json", "").replace("```", "")
+        return json.loads(json_text)
+    except Exception as e:
+        print(f"Ошибка при подсчете КБЖУ через API: {e}")
+        return None
 
 async def generate_recipe_from_ingredients(user_id, ingredients_text):
-    print(f"LLM STUB: Generating recipe from: {ingredients_text}")
-    return {"dish_name": "Запеченная куриная грудка с рисом", "description": "Простое и сытное блюдо, богатое белком.", "ingredients_used": ["Курица", "Рис"], "recipe_steps": ["1. Отварите рис до готовности.", "2. Натрите куриную грудку специями.", "3. Запекайте в духовке при 180°C в течение 20-25 минут.", "4. Подавайте курицу с рисом."]}
+    if not GEMINI_API_KEY: return None
 
+    model = genai.GenerativeModel('gemini-pro')
+    prompt = f"""
+    Придумай простой и здоровый рецепт из следующих ингредиентов: {ingredients_text}.
+    Верни ответ ТОЛЬКО в формате JSON со следующей структурой:
+    {{
+      "dish_name": "Название блюда",
+      "description": "Краткое описание",
+      "ingredients_used": ["Ингредиент 1", "Ингредиент 2"],
+      "recipe_steps": ["Шаг 1", "Шаг 2", "Шаг 3"]
+    }}
+    """
+    try:
+        response = await model.generate_content_async(prompt)
+        json_text = response.text.strip().replace("```json", "").replace("```", "")
+        return json.loads(json_text)
+    except Exception as e:
+        print(f"Ошибка при генерации рецепта через API: {e}")
+        return None
 
 ### НОВЫЙ КОД: Функция для автоматической установки напоминаний ###
 async def schedule_reminders_for_user(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
@@ -380,6 +465,10 @@ def main() -> None:
     
     persistence = PicklePersistence(filepath=PERSISTENCE_FILE)
     job_queue = JobQueue()
+
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
     TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
     if not TOKEN:
