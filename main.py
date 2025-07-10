@@ -1,14 +1,11 @@
-from telegram import Update
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, JobQueue, CallbackQueryHandler
-from telegram.ext import PicklePersistence
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, PicklePersistence, CallbackQueryHandler
 import datetime
 import json
 import os
 import matplotlib.pyplot as plt
 import io
 import random
-import requests
 from collections import defaultdict
 
 # --- Константы и глобальные переменные ---
@@ -69,9 +66,8 @@ def create_pfc_pie_chart(pfc_data):
     buf = io.BytesIO(); plt.savefig(buf, format='png'); buf.seek(0); plt.close()
     return buf
 
-# --- Интеграция с LLM ---
+# --- Интеграция с LLM (Заглушки) ---
 async def generate_personalized_menu_with_llm(user_profile, calorie_target, pfc_targets, num_days=1, meal_to_replace=None):
-    # Заглушка для тестирования
     SAMPLE_BREAKFASTS = [{"meal_name": "Завтрак (Овсянка с ягодами)", "items": [{"food_item": "овсяные хлопья", "grams": 50}, {"food_item": "ягоды", "grams": 100}], "total_calories": 350, "total_protein": 15, "total_fat": 8, "total_carbs": 55, "recipe": "Залить овсянку кипятком/молоком, добавить ягоды, дать настояться 5 минут."}]
     SAMPLE_LUNCHES = [{"meal_name": "Обед (Куриная грудка с гречкой)", "items": [{"food_item": "куриная грудка", "grams": 150}, {"food_item": "гречка", "grams": 60}], "total_calories": 550, "total_protein": 45, "total_fat": 10, "total_carbs": 60, "recipe": "Отварить гречку. Грудку запечь в специях или обжарить на гриле."}]
     SAMPLE_DINNERS = [{"meal_name": "Ужин (Творог с орехами)", "items": [{"food_item": "творог", "grams": 180}, {"food_item": "грецкие орехи", "grams": 20}], "total_calories": 300, "total_protein": 30, "total_fat": 18, "total_carbs": 8, "recipe": "Смешать творог с измельченными орехами."}]
@@ -111,9 +107,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [["Мужской", "Женский"]]; reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
         await update.message.reply_text("👋 Добро пожаловать! Давайте настроим ваш профиль.\nПожалуйста, укажите ваш пол:", reply_markup=reply_markup)
     else:
-        keyboard = [["Показать меню на день"], ["Меню на неделю"], ["Рассчитать КБЖУ", "Прогресс веса"], ["Записать еду"], ["/prefs", "/fridge"]]
-        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        await update.message.reply_text("👋 Бот активирован. Используйте меню для навигации.", reply_markup=reply_markup)
+        await update.message.reply_text("👋 Бот активирован. Используйте меню для навигации.", reply_markup=MAIN_REPLY_MARKUP)
 
 async def calculate_and_send_calories(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id); user_profile = user_profiles_data.get(user_id)
@@ -151,33 +145,41 @@ async def weekly_menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("На 3 дня", callback_data="gen_menu:3"), InlineKeyboardButton("На 5 дней", callback_data="gen_menu:5"), InlineKeyboardButton("На 7 дней", callback_data="gen_menu:7")]])
     await update.message.reply_text("На сколько дней вы хотите получить меню?", reply_markup=keyboard)
 
-async def generate_and_send_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, num_days: int):
-    if hasattr(update_or_query, 'effective_user'): 
-        # Это Update объект
-        user_id, chat_id = update_or_query.effective_user.id, update_or_query.effective_chat.id
-    else: 
-        # Это CallbackQuery объект
-        query = update_or_query
-        user_id, chat_id = query.from_user.id, query.message.chat_id
+async def generate_and_send_menu(update_or_query: Update | CallbackQueryHandler, context: ContextTypes.DEFAULT_TYPE, num_days: int):
+    chat_id = update_or_query.effective_chat.id
+    user_id = update_or_query.effective_user.id
+
     targets = await calculate_target_calories_and_pfc(user_id)
-    if not targets[0]: await context.bot.send_message(chat_id=chat_id, text="❗ Сначала настройте профиль (/start) и запишите свой вес."); return
+    if not targets[0]:
+        await context.bot.send_message(chat_id=chat_id, text="❗ Сначала настройте профиль (/start) и запишите свой вес.")
+        return
+
     await context.bot.send_message(chat_id=chat_id, text=f"📊 Генерирую ваше персональное меню на {num_days} {'день' if num_days == 1 else 'дня'}...")
-    user_profile = user_profiles_data.get(str(user_id), {}); pfc_targets = {'p': targets[1], 'f': targets[2], 'c': targets[3]}
+
+    user_profile = user_profiles_data.get(str(user_id), {})
+    pfc_targets = {'p': targets[1], 'f': targets[2], 'c': targets[3]}
     menu_data = await generate_personalized_menu_with_llm(user_profile, targets[0], pfc_targets, num_days=num_days)
-    if not menu_data or not menu_data.get('weekly_plan'): await context.bot.send_message(chat_id=chat_id, text="❗ Не удалось сгенерировать меню."); return
+
+    if not menu_data or not menu_data.get('weekly_plan'):
+        await context.bot.send_message(chat_id=chat_id, text="❗ Не удалось сгенерировать меню.")
+        return
+
     context.user_data['last_weekly_menu'] = menu_data
     for day_index, day_menu in enumerate(menu_data['weekly_plan']):
-        total_cals = sum(m.get('total_calories', 0) for m in day_menu['meals']); total_p = sum(m.get('total_protein', 0) for m in day_menu['meals']); total_f = sum(m.get('total_fat', 0) for m in day_menu['meals']); total_c = sum(m.get('total_carbs', 0) for m in day_menu['meals'])
+        total_cals = sum(m.get('total_calories', 0) for m in day_menu['meals'])
+        total_p = sum(m.get('total_protein', 0) for m in day_menu['meals'])
+        total_f = sum(m.get('total_fat', 0) for m in day_menu['meals'])
+        total_c = sum(m.get('total_carbs', 0) for m in day_menu['meals'])
         await context.bot.send_message(chat_id=chat_id, text=f"🍽️ *{day_menu.get('day_name', 'Ваше меню')}*\nИтог: *К ~{total_cals} | Б {total_p}г | Ж {total_f}г | У {total_c}г*", parse_mode='Markdown')
         for meal_index, meal in enumerate(day_menu['meals']):
             response_text = f"*{meal.get('meal_name', 'Прием пищи')}*\nКБЖУ: *{meal.get('total_calories', 0)} | {meal.get('total_protein', 0)} | {meal.get('total_fat', 0)} | {meal.get('total_carbs', 0)}*"
             keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔄 Заменить", callback_data=f"replace:{day_index}:{meal_index}"), InlineKeyboardButton("📖 Рецепт", callback_data=f"recipe:{day_index}:{meal_index}")]])
             await context.bot.send_message(chat_id=chat_id, text=response_text, reply_markup=keyboard, parse_mode='Markdown')
+
     if menu_data.get('shopping_list'):
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Показать список покупок", callback_data="show_shopping_list")]])
         await context.bot.send_message(chat_id=chat_id, text="Меню сгенерировано. Показать итоговый список покупок?", reply_markup=keyboard)
 
-# ### ИСПРАВЛЕНИЕ: Восстановлена недостающая функция ###
 async def prefs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id); profile = user_profiles_data.get(user_id, {})
     prefs = ", ".join(profile.get('preferences', [])) or "пока нет"; excls = ", ".join(profile.get('exclusions', [])) or "пока нет"
@@ -237,12 +239,22 @@ async def inline_button_handler(update: Update, context: ContextTypes.DEFAULT_TY
             await query.edit_message_text(text=new_text, reply_markup=new_keyboard, parse_mode='Markdown')
 
 async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip(); chat_id_str = str(update.effective_chat.id); user_id = str(update.effective_user.id)
+    text = update.message.text.strip()
+
+    # СНАЧАЛА проверяем, не нажал ли пользователь кнопку из главного меню
+    handler = MAIN_MENU_HANDLERS.get(text)
+    if handler:
+        await handler(update, context)
+        return  # Важно выйти, чтобы не обрабатывать дальше
+
+    chat_id_str = str(update.effective_chat.id); user_id = str(update.effective_user.id)
     current_setup_step = context.user_data.get('setup_step')
+
     if text.lower().startswith("вес"):
         try: weight_value = float(text[3:].strip().replace(',', '.')); save_weight(chat_id_str, weight_value); await update.message.reply_text(f"✅ Вес сохранён: {weight_value} кг")
         except (ValueError, IndexError): await update.message.reply_text("❗ Неверный формат. Пример: Вес 80.5")
         return
+
     if current_setup_step is not None and current_setup_step != SETUP_STATE_LOGGING_FOOD_AWAITING_INPUT:
         if current_setup_step == SETUP_STATE_GENDER:
             if text.lower() in ['мужской', 'женский']: context.user_data['profile_gender'] = text.lower(); context.user_data['setup_step'] = SETUP_STATE_AGE; await update.message.reply_text("Сколько вам лет?", reply_markup=ReplyKeyboardRemove())
@@ -287,20 +299,23 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                 with open(USER_PROFILES_FILE, "w", encoding="utf-8") as f: json.dump(user_profiles_data, f, indent=4)
                 for key in list(context.user_data.keys()):
                     if key.startswith('profile_') or key == 'setup_step': context.user_data.pop(key, None)
-                await update.message.reply_text("✅ Ваш профиль полностью настроен!"); await calculate_and_send_calories(update, context)
-                main_keyboard = [["Показать меню на день"], ["Меню на неделю"], ["Рассчитать КБЖУ", "Прогресс веса"], ["Записать еду", "/prefs"], ["/fridge"]]
-                await update.message.reply_text("Теперь вы можете использовать основные функции:", reply_markup=ReplyKeyboardMarkup(main_keyboard, resize_keyboard=True))
+                await update.message.reply_text("✅ Ваш профиль полностью настроен!")
+                await calculate_and_send_calories(update, context)
+                await update.message.reply_text("Теперь вы можете использовать основные функции:", reply_markup=MAIN_REPLY_MARKUP)
             else: await update.message.reply_text("❗ Пожалуйста, выберите один из вариантов с помощью кнопок.")
         return
+
     if current_setup_step == SETUP_STATE_LOGGING_FOOD_AWAITING_INPUT:
         if text.lower() == "готово":
             await update.message.reply_text("⏳ Анализирую съеденное...")
             logged_items = context.user_data.pop('current_food_log_session_items', []); context.user_data['setup_step'] = SETUP_STATE_NONE
-            main_keyboard = [["Показать меню на день"], ["Меню на неделю"], ["Рассчитать КБЖУ", "Прогресс веса"], ["Записать еду", "/prefs"], ["/fridge"]]
-            reply_markup = ReplyKeyboardMarkup(main_keyboard, resize_keyboard=True)
-            if not logged_items: await update.message.reply_text("Ничего не было записано.", reply_markup=reply_markup); return
+            if not logged_items:
+                await update.message.reply_text("Ничего не было записано.", reply_markup=MAIN_REPLY_MARKUP)
+                return
             pfc_data = await calculate_calories_from_food_list_llm(user_id, logged_items)
-            if pfc_data is None: await update.message.reply_text("❗ Не удалось подсчитать КБЖУ.", reply_markup=reply_markup); return
+            if pfc_data is None:
+                await update.message.reply_text("❗ Не удалось подсчитать КБЖУ.", reply_markup=MAIN_REPLY_MARKUP)
+                return
             session_pfc = pfc_data; today_iso = datetime.date.today().isoformat(); total_pfc = {}
             for key in ["calories", "protein", "fat", "carbs"]:
                 data_key = f"daily_{key}_{today_iso}"; new_total = context.user_data.get(data_key, 0) + session_pfc[key]
@@ -313,21 +328,24 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
                         f"Жиры: *{total_pfc['fat']}* / {target_pfc.get('fat') or '?'} г\n"
                         f"Углеводы: *{total_pfc['carbs']}* / {target_pfc.get('carbs') or '?'} г")
             chart = create_pfc_pie_chart(total_pfc)
-            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=chart, caption=feedback, parse_mode='Markdown', reply_markup=reply_markup)
+            await context.bot.send_photo(chat_id=update.effective_chat.id, photo=chart, caption=feedback, parse_mode='Markdown', reply_markup=MAIN_REPLY_MARKUP)
         else:
             context.user_data.setdefault('current_food_log_session_items', []).append(text)
             await update.message.reply_text("Принято. Что-нибудь еще?")
         return
+
     if current_setup_step == SETUP_STATE_ADDING_PREFERENCE:
         profile = user_profiles_data.get(user_id, {}); profile.setdefault('preferences', []).append(text);
         with open(USER_PROFILES_FILE, "w", encoding="utf-8") as f: json.dump(user_profiles_data, f, indent=4)
         await update.message.reply_text(f"✅ Продукт '{text}' добавлен в любимые."); context.user_data['setup_step'] = SETUP_STATE_NONE
         await prefs_command(update, context); return
+
     if current_setup_step == SETUP_STATE_ADDING_EXCLUSION:
         profile = user_profiles_data.get(user_id, {}); profile.setdefault('exclusions', []).append(text);
         with open(USER_PROFILES_FILE, "w", encoding="utf-8") as f: json.dump(user_profiles_data, f, indent=4)
         await update.message.reply_text(f"✅ Продукт '{text}' добавлен в исключения."); context.user_data['setup_step'] = SETUP_STATE_NONE
         await prefs_command(update, context); return
+
     if current_setup_step == SETUP_STATE_AWAITING_FRIDGE_INGREDIENTS:
         await update.message.reply_text("🤔 Думаю, что можно приготовить...")
         recipe_data = await generate_recipe_from_ingredients(user_id, text); context.user_data['setup_step'] = SETUP_STATE_NONE
@@ -336,30 +354,53 @@ async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text(response, parse_mode='Markdown')
         else: await update.message.reply_text("Не удалось придумать рецепт из этих продуктов.")
         return
+
     await update.message.reply_text("🤖 Нераспознанная команда. Воспользуйтесь кнопками меню.")
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    handlers = {"Показать меню на день": menu_command, "Меню на неделю": weekly_menu_command, "Рассчитать КБЖУ": calories_command, "Прогресс веса": progress_command, "Записать еду": log_food_command, "Предпочтения": prefs_command, "Что в холодильнике": fridge_command}
-    handler = handlers.get(text)
-    if handler: await handler(update, context)
-    else: await handle_text_messages(update, context)
+# --- ЕДИНЫЕ ОПРЕДЕЛЕНИЯ ДЛЯ МЕНЮ ---
+MAIN_MENU_HANDLERS = {
+    "Показать меню на день": menu_command,
+    "Меню на неделю": weekly_menu_command,
+    "Рассчитать КБЖУ": calories_command,
+    "Прогресс веса": progress_command,
+    "Записать еду": log_food_command,
+}
+
+main_keyboard_layout = [
+    ["Показать меню на день", "Меню на неделю"],
+    ["Рассчитать КБЖУ", "Прогресс веса"],
+    ["Записать еду"],
+    ["/prefs", "/fridge"] # Команды тоже можно оставить на клавиатуре
+]
+MAIN_REPLY_MARKUP = ReplyKeyboardMarkup(main_keyboard_layout, resize_keyboard=True)
+
 
 def main():
     global user_profiles_data
     user_profiles_data = load_json_data(USER_PROFILES_FILE)
     persistence = PicklePersistence(filepath=PERSISTENCE_FILE)
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not telegram_bot_token: print("ERROR: TELEGRAM_BOT_TOKEN not set."); exit(1)
-    app = ApplicationBuilder().token(os.environ["TELEGRAM_BOT_TOKEN"]).build()
-    app.add_handler(CommandHandler("start", start)); app.add_handler(CommandHandler("menu", menu_command))
+    if not telegram_bot_token:
+        print("ERROR: TELEGRAM_BOT_TOKEN not set."); exit(1)
+
+    app = ApplicationBuilder().token(telegram_bot_token).persistence(persistence).build()
+
+    # Основные команды
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("menu", menu_command))
     app.add_handler(CommandHandler("weeklymenu", weekly_menu_command))
-    app.add_handler(CommandHandler("calories", calories_command)); app.add_handler(CommandHandler("progress", progress_command))
-    app.add_handler(CommandHandler("log_food", log_food_command)); app.add_handler(CommandHandler("prefs", prefs_command)); app.add_handler(CommandHandler("fridge", fridge_command))
+    app.add_handler(CommandHandler("calories", calories_command))
+    app.add_handler(CommandHandler("progress", progress_command))
+    app.add_handler(CommandHandler("log_food", log_food_command))
+    app.add_handler(CommandHandler("prefs", prefs_command))
+    app.add_handler(CommandHandler("fridge", fridge_command))
+
+    # Обработчик инлайн-кнопок
     app.add_handler(CallbackQueryHandler(inline_button_handler))
-    main_buttons = ["Показать меню на день", "Меню на неделю", "Рассчитать КБЖУ", "Прогресс веса", "Записать еду", "Предпочтения", "Что в холодильнике"]
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(f"^({'|'.join(main_buttons)})$"), button_handler))
+
+    # Единый обработчик для всего текста (включая кнопки)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
+
     print("Bot started polling...")
     app.run_polling()
 
