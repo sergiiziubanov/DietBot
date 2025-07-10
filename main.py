@@ -12,6 +12,11 @@ import io
 import random
 from collections import defaultdict
 
+# Создаем глобальную переменную и настраиваем API-ключ при старте
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    
 # --- Константы и глобальные переменные ---
 WEIGHT_LOG_FILE = "weight_log.json"
 USER_PROFILES_FILE = "user_profiles.json"
@@ -465,10 +470,6 @@ def main() -> None:
     
     persistence = PicklePersistence(filepath=PERSISTENCE_FILE)
     job_queue = JobQueue()
-
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-    if GEMINI_API_KEY:
-        genai.configure(api_key=GEMINI_API_KEY)
 
     TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
     if not TOKEN:
