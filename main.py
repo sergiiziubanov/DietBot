@@ -81,71 +81,96 @@ def create_pfc_pie_chart(pfc_data):
     buf = io.BytesIO(); plt.savefig(buf, format='png'); buf.seek(0); plt.close()
     return buf
 
+### НАЧАЛО ИСПРАВЛЕННОЙ ФУНКЦИИ ###
+
 async def generate_personalized_menu_with_llm(user_profile, calorie_target, pfc_targets, num_days=1, meal_to_replace=None):
-    # Проверяем, доступен ли API-ключ
     if not GEMINI_API_KEY:
-        return {"weekly_plan": [], "shopping_list": ["ОШИБКА: API-ключ для Gemini не настроен."]}
+        return None # Возвращаем None при ошибке ключа
 
-    # Выбираем модель
     model = genai.GenerativeModel('gemini-1.5-flash-latest')
-    
-    # Создаем очень подробный промпт для нейросети
-    # Мы просим ее вернуть ответ строго в формате JSON, чтобы наш код мог его прочитать
-    prompt = f"""
-    Выступи в роли диетолога. Создай план питания на {num_days} дней для пользователя со следующими параметрами:
-    - Пол: {user_profile.get('gender')}
-    - Возраст: {user_profile.get('age')}
-    - Рост: {user_profile.get('height')} см
-    - Уровень активности: {user_profile.get('activity')} из 5
-    - Цель диеты: {user_profile.get('diet_goal')}
+    safety_settings = [
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
+    ]
 
-    Суточная цель по калориям: примерно {calorie_target} ккал.
-    Цель по БЖУ: Белки ~{pfc_targets['p']}г, Жиры ~{pfc_targets['f']}г, Углеводы ~{pfc_targets['c']}г.
+    ### НОВЫЙ КОД: Разделяем логику для замены и для генерации ###
+    if meal_to_replace:
+        # --- ЛОГИКА ДЛЯ ЗАМЕНЫ ОДНОГО БЛЮДА ---
+        original_meal_name = meal_to_replace.get('meal_name', 'это блюдо')
+        
+        prompt = f"""
+        Выступи в роли диетолога. Найди замену для блюда "{original_meal_name}".
+        Это должно быть простое, здоровое и похожее по типу блюдо (завтрак на завтрак, ужин на ужин).
 
-    Пожалуйста, верни ответ ИСКЛЮЧИТЕЛЬНО в формате JSON. Не добавляй никакого текста до или после JSON.
-    Структура JSON должна быть следующей:
-    {{
-      "weekly_plan": [
+        Верни ответ ИСКЛЮЧИТЕЛЬНО в формате JSON. Не добавляй никакого текста до или после JSON.
+        Структура JSON должна быть следующей (только один объект):
         {{
-          "day_name": "День 1",
-          "meals": [
-            {{
-              "meal_name": "Завтрак (Название блюда)",
-              "items": [{{"food_item": "название продукта", "grams": 100}}],
-              "total_calories": 350,
-              "total_protein": 20,
-              "total_fat": 10,
-              "total_carbs": 45,
-              "recipe": "Краткий рецепт приготовления."
-            }},
-            {{
-              "meal_name": "Обед (Название блюда)",
-              "items": [], "total_calories": 550, "total_protein": 40, "total_fat": 20, "total_carbs": 50, "recipe": "..."
-            }},
-            {{
-              "meal_name": "Ужин (Название блюда)",
-              "items": [], "total_calories": 400, "total_protein": 30, "total_fat": 15, "total_carbs": 35, "recipe": "..."
-            }}
-          ]
+          "meal_name": "Новый прием пищи (Новое название)",
+          "items": [{{"food_item": "продукт", "grams": 100}}],
+          "total_calories": 400,
+          "total_protein": 30,
+          "total_fat": 15,
+          "total_carbs": 35,
+          "recipe": "Краткий рецепт приготовления нового блюда."
         }}
-      ],
-      "shopping_list": ["Продукт 1: X г", "Продукт 2: Y г"]
-    }}
-    Создай разнообразные и простые блюда. Список покупок должен включать все ингредиенты на {num_days} дней.
-    """
+        """
+        try:
+            response = await model.generate_content_async(prompt, safety_settings=safety_settings)
+            json_text = response.text.strip().replace("```json", "").replace("```", "")
+            return json.loads(json_text)
+        except Exception as e:
+            print(f"Ошибка при замене блюда через API: {e}")
+            return None # Возвращаем None в случае ошибки
 
-    try:
-        # Отправляем запрос в нейросеть
-        response = await model.generate_content_async(prompt)
-        
-        # Очищаем ответ от лишних символов и загружаем JSON
-        json_text = response.text.strip().replace("```json", "").replace("```", "")
-        parsed_json = json.loads(json_text)
-        return parsed_json
-        
-    except Exception as e:
-        print(f"Ошибка при вызове API Gemini: {e}")
-        return {"weekly_plan": [], "shopping_list": [f"ОШИБКА: Не удалось сгенерировать меню. {e}"]}
+    else:
+        # --- СТАРЫЙ КОД В БЛОКЕ ELSE: ЛОГИКА ДЛЯ ГЕНЕРАЦИИ ПОЛНОГО МЕНЮ ---
+        prompt = f"""
+        Выступи в роли диетолога. Создай план питания на {num_days} дней для пользователя со следующими параметрами:
+        - Пол: {user_profile.get('gender')}
+        - Возраст: {user_profile.get('age')}
+        - Рост: {user_profile.get('height')} см
+        - Уровень активности: {user_profile.get('activity')} из 5
+        - Цель диеты: {user_profile.get('diet_goal')}
+
+        Суточная цель по калориям: примерно {calorie_target} ккал.
+        Цель по БЖУ: Белки ~{pfc_targets['p']}г, Жиры ~{pfc_targets['f']}г, Углеводы ~{pfc_targets['c']}г.
+
+        Пожалуйста, верни ответ ИСКЛЮЧИТЕЛЬНО в формате JSON. Не добавляй никакого текста до или после JSON.
+        Структура JSON должна быть следующей:
+        {{
+          "weekly_plan": [
+            {{
+              "day_name": "День 1",
+              "meals": [
+                {{
+                  "meal_name": "Завтрак (Название блюда)",
+                  "items": [{{"food_item": "название продукта", "grams": 100}}],
+                  "total_calories": 350, "total_protein": 20, "total_fat": 10, "total_carbs": 45,
+                  "recipe": "Краткий рецепт приготовления."
+                }},
+                {{ "meal_name": "Обед (Название блюда)", "items": [], "total_calories": 550, "total_protein": 40, "total_fat": 20, "total_carbs": 50, "recipe": "..."}},
+                {{ "meal_name": "Ужин (Название блюда)", "items": [], "total_calories": 400, "total_protein": 30, "total_fat": 15, "total_carbs": 35, "recipe": "..."}}
+              ]
+            }}
+          ],
+          "shopping_list": ["Продукт 1: X г", "Продукт 2: Y г"]
+        }}
+        Создай разнообразные и простые блюда. Список покупок должен включать все ингредиенты на {num_days} дней.
+        """
+        response = None
+        try:
+            response = await model.generate_content_async(prompt, safety_settings=safety_settings)
+            json_text = response.text.strip().replace("```json", "").replace("```", "")
+            return json.loads(json_text)
+        except Exception as e:
+            if response:
+                print(f"Не удалось распарсить JSON. Ответ от Gemini: {response.text}")
+            print(f"Ошибка при вызове API Gemini: {e}")
+            return {"weekly_plan": [], "shopping_list": [f"ОШИБКА: Не удалось сгенерировать меню."]}
+
+### КОНЕЦ ИСПРАВЛЕННОЙ ФУНКЦИИ ###
 
 async def calculate_calories_from_food_list_llm(user_id, food_list_items):
     if not GEMINI_API_KEY: return None
