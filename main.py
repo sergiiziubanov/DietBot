@@ -16,7 +16,10 @@ from collections import defaultdict
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    
+
+### НОВЫЙ КОД: Определяем имя модели в одном месте ###
+MODEL_NAME = "gemini-1.5-flash-latest"
+
 # --- Константы и глобальные переменные ---
 WEIGHT_LOG_FILE = "weight_log.json"
 USER_PROFILES_FILE = "user_profiles.json"
@@ -84,7 +87,7 @@ async def generate_personalized_menu_with_llm(user_profile, calorie_target, pfc_
         return {"weekly_plan": [], "shopping_list": ["ОШИБКА: API-ключ для Gemini не настроен."]}
 
     # Выбираем модель
-    model = genai.GenerativeModel('gemini-pro')
+    model = genai.GenerativeModel('MODEL_NAME')
     
     # Создаем очень подробный промпт для нейросети
     # Мы просим ее вернуть ответ строго в формате JSON, чтобы наш код мог его прочитать
@@ -147,7 +150,7 @@ async def generate_personalized_menu_with_llm(user_profile, calorie_target, pfc_
 async def calculate_calories_from_food_list_llm(user_id, food_list_items):
     if not GEMINI_API_KEY: return None
     
-    model = genai.GenerativeModel('gemini-pro')
+    model = genai.GenerativeModel('MODEL_NAME')
     food_list_str = ", ".join(food_list_items)
     
     prompt = f"""
@@ -172,7 +175,7 @@ async def calculate_calories_from_food_list_llm(user_id, food_list_items):
 async def generate_recipe_from_ingredients(user_id, ingredients_text):
     if not GEMINI_API_KEY: return None
 
-    model = genai.GenerativeModel('gemini-pro')
+    model = genai.GenerativeModel('MODEL_NAME')
     prompt = f"""
     Придумай простой и здоровый рецепт из следующих ингредиентов: {ingredients_text}.
     Верни ответ ТОЛЬКО в формате JSON со следующей структурой:
