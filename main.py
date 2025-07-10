@@ -364,34 +364,35 @@ MAIN_MENU_HANDLERS = {
     "Рассчитать КБЖУ": calories_command,
     "Прогресс веса": progress_command,
     "Записать еду": log_food_command,
+    "Предпочтения": prefs_command,
+    "Что в холодильнике?": fridge_command,
 }
 
 main_keyboard_layout = [
     ["Показать меню на день", "Меню на неделю"],
     ["Рассчитать КБЖУ", "Прогресс веса"],
     ["Записать еду"],
-    ["/prefs", "/fridge"] # Команды тоже можно оставить на клавиатуре
+    ["Предпочтения", "Что в холодильнике?"]
 ]
 MAIN_REPLY_MARKUP = ReplyKeyboardMarkup(main_keyboard_layout, resize_keyboard=True)
 
-
-def main():
+# ===== ИЗМЕНЕННАЯ ФУНКЦИЯ MAIN =====
+def main() -> None:
+    """Запускает бота в режиме вебхука для работы на Render."""
     global user_profiles_data
     user_profiles_data = load_json_data(USER_PROFILES_FILE)
     persistence = PicklePersistence(filepath=PERSISTENCE_FILE)
-    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not telegram_bot_token:
-        print("ERROR: TELEGRAM_BOT_TOKEN not set."); exit(1)
+    
+    # Получаем токен из переменных окружения
+    TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not TOKEN:
+        raise ValueError("Не найден токен TELEGRAM_BOT_TOKEN в переменных окружения")
 
-    app = ApplicationBuilder().token(telegram_bot_token).persistence(persistence).build()
+    # Собираем приложение
+    app = ApplicationBuilder().token(TOKEN).persistence(persistence).build()
 
-    # Основные команды
+    # Регистрируем все обработчики команд
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("menu", menu_command))
-    app.add_handler(CommandHandler("weeklymenu", weekly_menu_command))
-    app.add_handler(CommandHandler("calories", calories_command))
-    app.add_handler(CommandHandler("progress", progress_command))
-    app.add_handler(CommandHandler("log_food", log_food_command))
     app.add_handler(CommandHandler("prefs", prefs_command))
     app.add_handler(CommandHandler("fridge", fridge_command))
 
@@ -400,9 +401,27 @@ def main():
 
     # Единый обработчик для всего текста (включая кнопки)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
+    
+    # --- НАСТРОЙКИ ВЕБХУКА ---
+    
+    # Render предоставляет порт через переменную окружения PORT
+    PORT = int(os.environ.get('PORT', 8443))
+    
+    # URL вашего сервиса на Render. Render предоставляет его автоматически.
+    RENDER_EXTERNAL_URL = os.environ.get('RENDER_EXTERNAL_URL')
+    if not RENDER_EXTERNAL_URL:
+        raise ValueError("Не найдена переменная RENDER_EXTERNAL_URL. Убедитесь, что сервис запущен на Render.")
 
-    print("Bot started polling...")
-    app.run_polling()
+    print("Бот запускается в режиме вебхука...")
+    
+    # Запускаем бота. Он будет слушать входящие запросы от Telegram.
+    # Мы используем часть токена как секретный путь, чтобы никто другой не мог отправлять запросы нашему боту.
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        secret_token=TOKEN.split(':')[-1], # Используем часть токена как секрет
+        webhook_url=RENDER_EXTERNAL_URL
+    )
 
 if __name__ == "__main__":
     main()
